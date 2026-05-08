@@ -1291,71 +1291,66 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                 position={slot.center}
                 icon={divIcon({
                   className: "slot-number-label",
-                  html: slot.isAccessible
-                    ? `
-      <div style="
-        width: ${isMobile ? 42 : 48}px;
-        height: ${isMobile ? 42 : 48}px;
-        border-radius: 9999px;
-        background: #2563eb;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
-        border: 3px solid white;
-      ">
-        <svg
-          width="${isMobile ? 28 : 32}"
-          height="${isMobile ? 28 : 32}"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="white"
-          stroke-width="2.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <circle cx="9" cy="4" r="2.2"></circle>
-          <path d="M9 7v5h5"></path>
-          <path d="M10 12l2.5 5"></path>
-          <path d="M7.5 10.5a5.5 5.5 0 1 0 6.7 7.9"></path>
-          <path d="M14 12h3l2 5"></path>
-        </svg>
-      </div>
-    `
-                    : `
-      <div style="
-        width: ${isMobile ? 18 : 20}px;
-        height: ${isMobile ? 18 : 20}px;
-        border-radius: 9999px;
-        background: ${selectedSlot?.number === slot.number
-                      ? "#f59e0b"
-                      : "rgba(15,23,42,0.72)"
+                  html: `
+    <div style="
+      width: ${slot.isAccessible
+                      ? (isMobile ? 32 : 36)
+                      : (isMobile ? 18 : 20)
+                    }px;
+      height: ${slot.isAccessible
+                      ? (isMobile ? 32 : 36)
+                      : (isMobile ? 18 : 20)
+                    }px;
+      border-radius: 9999px;
+      background: ${slot.isAccessible
+                      ? "#2563eb"
+                      : selectedSlot?.number === slot.number
+                        ? "#f59e0b"
+                        : "rgba(15,23,42,0.82)"
                     };
-        color: ${selectedSlot?.number === slot.number
-                      ? "#0f172a"
-                      : "white"
+      color: ${slot.isAccessible
+                      ? "#ffffff"
+                      : selectedSlot?.number === slot.number
+                        ? "#0f172a"
+                        : "#ffffff"
                     };
-        font-size: ${isMobile ? 9 : 10}px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-        border: ${selectedSlot?.number === slot.number
-                      ? "2px solid rgba(15,23,42,0.9)"
-                      : "1px solid rgba(255,255,255,0.8)"
+      font-size: ${slot.isAccessible
+                      ? (isMobile ? 22 : 26)
+                      : (isMobile ? 11 : 13)
+                    }px;
+      font-weight: 900;
+      font-family: Arial, 'Segoe UI Symbol', 'Apple Color Emoji', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.38);
+      border: ${slot.isAccessible
+                      ? "2px solid rgba(255,255,255,0.95)"
+                      : selectedSlot?.number === slot.number
+                        ? "2px solid rgba(15,23,42,0.95)"
+                        : "1.5px solid rgba(255,255,255,0.85)"
                     };
-      ">
-        ${slot.number}
-      </div>
-    `,
-                  iconSize: slot.isAccessible
-                    ? [isMobile ? 42 : 48, isMobile ? 42 : 48]
-                    : [isMobile ? 18 : 20, isMobile ? 18 : 20],
-                  iconAnchor: slot.isAccessible
-                    ? [isMobile ? 21 : 24, isMobile ? 21 : 24]
-                    : [isMobile ? 9 : 10, isMobile ? 9 : 10],
+      line-height: 1;
+    ">
+      ${slot.isAccessible ? "♿" : slot.number}
+    </div>
+  `,
+                  iconSize: [
+                    slot.isAccessible
+                      ? (isMobile ? 32 : 36)
+                      : (isMobile ? 18 : 20),
+                    slot.isAccessible
+                      ? (isMobile ? 32 : 36)
+                      : (isMobile ? 18 : 20)
+                  ],
+                  iconAnchor: [
+                    slot.isAccessible
+                      ? (isMobile ? 16 : 18)
+                      : (isMobile ? 11 : 13),
+                    slot.isAccessible
+                      ? (isMobile ? 16 : 18)
+                      : (isMobile ? 11 : 13)
+                  ],
                 })}
                 interactive={false}
                 zIndexOffset={1000}
@@ -1757,8 +1752,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
           <div className="fixed inset-0 z-[990] flex items-center justify-center bg-slate-950/70 p-3">
             <div
               className={`w-full max-w-md rounded-2xl border p-4 shadow-2xl ${isLightTheme
-                ? "border-cyan-200 bg-white text-slate-800"
-                : "border-cyan-300/30 bg-slate-900 text-cyan-50"
+                  ? "border-cyan-200 bg-white text-slate-800"
+                  : "border-cyan-300/30 bg-slate-900 text-cyan-50"
                 }`}
             >
               <div className="mb-3">
@@ -1777,10 +1772,10 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                       type="button"
                       onClick={() => setSelectedTopUpEuro(amount)}
                       className={`rounded-lg border px-2 py-2 text-sm font-semibold transition-all duration-200 ${selectedTopUpEuro === amount
-                        ? "border-yellow-200 !bg-yellow-400 text-slate-900 shadow-md shadow-yellow-500/30"
-                        : isLightTheme
-                          ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                          : "border-slate-600 bg-slate-800 text-cyan-50 hover:bg-slate-700"
+                          ? "border-yellow-200 !bg-yellow-400 text-slate-900 shadow-md shadow-yellow-500/30"
+                          : isLightTheme
+                            ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                            : "border-slate-600 bg-slate-800 text-cyan-50 hover:bg-slate-700"
                         }`}
                     >
                       {amount}€
@@ -1797,8 +1792,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                   onChange={(event) => setCardHolder(event.target.value)}
                   placeholder="p.sh. Filan Fisteku"
                   className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
-                    ? "border-slate-300 bg-white text-slate-800"
-                    : "border-slate-600 bg-slate-800 text-cyan-50"
+                      ? "border-slate-300 bg-white text-slate-800"
+                      : "border-slate-600 bg-slate-800 text-cyan-50"
                     }`}
                 />
 
@@ -1809,8 +1804,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                   onChange={(event) => setCardNumber(event.target.value)}
                   placeholder="XXXX XXXX XXXX XXXX"
                   className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
-                    ? "border-slate-300 bg-white text-slate-800"
-                    : "border-slate-600 bg-slate-800 text-cyan-50"
+                      ? "border-slate-300 bg-white text-slate-800"
+                      : "border-slate-600 bg-slate-800 text-cyan-50"
                     }`}
                 />
 
@@ -1823,8 +1818,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                       onChange={(event) => setCardExpiry(event.target.value)}
                       placeholder="MM/YY"
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
-                        ? "border-slate-300 bg-white text-slate-800"
-                        : "border-slate-600 bg-slate-800 text-cyan-50"
+                          ? "border-slate-300 bg-white text-slate-800"
+                          : "border-slate-600 bg-slate-800 text-cyan-50"
                         }`}
                     />
                   </div>
@@ -1837,8 +1832,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                       onChange={(event) => setCardCvv(event.target.value)}
                       placeholder="123"
                       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
-                        ? "border-slate-300 bg-white text-slate-800"
-                        : "border-slate-600 bg-slate-800 text-cyan-50"
+                          ? "border-slate-300 bg-white text-slate-800"
+                          : "border-slate-600 bg-slate-800 text-cyan-50"
                         }`}
                     />
                   </div>
@@ -1847,8 +1842,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                 {topUpError && (
                   <div
                     className={`mb-3 rounded-lg border px-3 py-2 text-xs ${isLightTheme
-                      ? "border-rose-300 bg-rose-50 text-rose-700"
-                      : "border-rose-300/60 bg-rose-500/15 text-rose-100"
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-rose-300/60 bg-rose-500/15 text-rose-100"
                       }`}
                   >
                     {topUpError}
@@ -1870,8 +1865,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                     type="button"
                     onClick={closeTopUpModal}
                     className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${isLightTheme
-                      ? "border-slate-300 text-slate-700 hover:bg-slate-100"
-                      : "border-slate-600 text-cyan-100 hover:bg-slate-800"
+                        ? "border-slate-300 text-slate-700 hover:bg-slate-100"
+                        : "border-slate-600 text-cyan-100 hover:bg-slate-800"
                       }`}
                   >
                     Mbyll

@@ -444,14 +444,14 @@ export default function App() {
       </div>
 
       {showVisitorDashboard && !isAdmin && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/70 p-3">
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/70 p-2 sm:p-3">
           <div
-            className={`w-full max-w-5xl rounded-2xl border p-4 shadow-2xl ${isVisitorLight
+            className={`flex h-[92dvh] max-h-[92dvh] w-full max-w-5xl flex-col rounded-2xl border p-3 shadow-2xl sm:h-[88vh] sm:max-h-[88vh] sm:p-4 ${isVisitorLight
                 ? "border-cyan-200 bg-white text-slate-800"
                 : "border-cyan-300/30 bg-slate-900 text-cyan-50"
               }`}
           >
-            <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold">Dashboard i rezervimeve</h2>
                 <p className={`mt-1 text-xs ${isVisitorLight ? "text-slate-500" : "text-cyan-100/70"}`}>
@@ -471,59 +471,66 @@ export default function App() {
               </button>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-700/30">
-              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                <thead
-                  className={
-                    isVisitorLight
-                      ? "bg-slate-100 text-slate-700"
-                      : "bg-slate-800 text-cyan-100"
-                  }
-                >
-                  <tr>
-                    <th className="px-3 py-3 font-semibold">Zona</th>
-                    <th className="px-3 py-3 font-semibold">Parkingu</th>
-                    <th className="px-3 py-3 font-semibold">Makina</th>
-                    <th className="px-3 py-3 font-semibold">Kohëzgjatja</th>
-                    <th className="px-3 py-3 font-semibold">Skadimi Ora</th>
-                    <th className="px-3 py-3 font-semibold">Skadimi data</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {visitorDashboardRows.length > 0 ? (
-                    visitorDashboardRows.map((row, index) => (
-                      <tr
-                        key={`${row.zone}-${row.parking}-${row.car}-${index}`}
-                        className={`border-t ${isVisitorLight
-                            ? "border-slate-200 hover:bg-slate-50"
-                            : "border-slate-700 hover:bg-slate-800/70"
-                          }`}
-                      >
-                        <td className="px-3 py-3 font-semibold">{row.zone}</td>
-                        <td className="px-3 py-3">{row.parking}</td>
-                        <td className="px-3 py-3">{row.car}</td>
-                        <td className="px-3 py-3">{row.duration}</td>
-                        <td className="px-3 py-3">{row.expiryTime}</td>
-                        <td className="px-3 py-3">{row.expiryDate}</td>
-                      </tr>
-                    ))
-                  ) : (
+            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-700/30">
+              <div
+                className="h-full w-full overflow-auto"
+                style={{
+                  WebkitOverflowScrolling: "touch",
+                  overscrollBehavior: "contain",
+                }}
+              >
+                <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                  <thead
+                    className={`sticky top-0 z-10 ${isVisitorLight
+                        ? "bg-slate-100 text-slate-700"
+                        : "bg-slate-800 text-cyan-100"
+                      }`}
+                  >
                     <tr>
-                      <td
-                        colSpan={6}
-                        className={`px-3 py-8 text-center text-sm ${isVisitorLight ? "text-slate-500" : "text-cyan-100/70"
-                          }`}
-                      >
-                        Nuk ka rezervime aktive për momentin.
-                      </td>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Zona</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Parkingu</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Makina</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Kohëzgjatja</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Skadimi Ora</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Skadimi data</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+
+                  <tbody>
+                    {visitorDashboardRows.length > 0 ? (
+                      visitorDashboardRows.map((row, index) => (
+                        <tr
+                          key={`${row.zone}-${row.parking}-${row.car}-${index}`}
+                          className={`border-t ${isVisitorLight
+                              ? "border-slate-200 hover:bg-slate-50"
+                              : "border-slate-700 hover:bg-slate-800/70"
+                            }`}
+                        >
+                          <td className="whitespace-nowrap px-3 py-3 font-semibold">{row.zone}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{row.parking}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{row.car}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{row.duration}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{row.expiryTime}</td>
+                          <td className="whitespace-nowrap px-3 py-3">{row.expiryDate}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className={`px-3 py-8 text-center text-sm ${isVisitorLight ? "text-slate-500" : "text-cyan-100/70"
+                            }`}
+                        >
+                          Nuk ka rezervime aktive për momentin.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div className="mt-4 flex justify-end">
+            <div className="mt-3 flex shrink-0 justify-end">
               <button
                 type="button"
                 onClick={() => setShowVisitorDashboard(false)}
