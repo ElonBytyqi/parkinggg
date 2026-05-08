@@ -1,0 +1,43 @@
+# CAP parking-cap
+_out
+*.db
+*.sqlite
+connection.properties
+default-*.json
+.cdsrc-private.json
+gen/
+node_modules/
+target/
+
+# Frontend build (keep for deployment but ignore locally)
+# app/parking-web/dist/
+
+# Environment files with secrets
+.env
+**/.env
+.env.local
+.env.production.local
+
+# Web IDE, App Studio
+.che/
+.gen/
+
+# MTA
+*_mta_build_tmp
+*.mtar
+mta_archives/
+
+# Other
+.DS_Store
+*.orig
+*.log
+
+*.iml
+*.flattened-pom.xml
+
+# IDEs
+# .vscode
+# .idea
+
+# @cap-js/cds-typer
+@cds-models

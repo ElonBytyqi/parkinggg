@@ -1,0 +1,41 @@
+{
+  "name": "parking-cap",
+  "version": "1.0.0",
+  "description": "Parking management app with real-time availability.",
+  "dependencies": {
+    "@sap/cds": "^9",
+    "@cap-js/sqlite": "^2",
+    "@cap-js/postgres": "^2",
+    "express": "^4"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "cds-serve",
+    "start:local": "cds-serve --with-mocks --in-memory",
+    "build:frontend": "cd app/parking-web && npm install && npm run build",
+    "postinstall": "npm run build:frontend || true",
+    "deploy:db": "cds deploy --to postgres"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "cds": {
+    "requires": {
+      "auth": {
+        "kind": "dummy"
+      },
+      "db": {
+        "kind": "sqlite",
+        "impl": "@cap-js/sqlite",
+        "credentials": {
+          "database": ":memory:"
+        },
+        "[production]": {
+          "kind": "postgres",
+          "impl": "@cap-js/postgres"
+        }
+      }
+    }
+  },
+  "private": true
+}
