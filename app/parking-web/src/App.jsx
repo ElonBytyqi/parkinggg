@@ -5,14 +5,61 @@ import LoginModal from "./components/LoginModal";
 import QRCodeDisplay from "./components/QRCodeDisplay";
 import AdminZoneCard from "./components/parking/AdminZoneCard";
 import VisitorZoneCard from "./components/parking/VisitorZoneCard";
-import { LogOut, QrCode, RefreshCw, Sparkles, Sun, Moon } from "lucide-react";
+import { LogOut, QrCode, RefreshCw, Sparkles, Sun, Moon, X } from "lucide-react";
+const visitorReservationStorageKey = "visitor-slot-reservations";
 
+function readVisitorReservationsForDashboard() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const raw = window.localStorage.getItem(visitorReservationStorageKey);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function formatDashboardDuration(hours) {
+  const numericHours = Number(hours || 0);
+
+  if (numericHours >= 24 * 365) return "Rezident";
+  if (numericHours === 24 * 7) return "1 jave";
+  if (numericHours === 24) return "24h";
+  if (numericHours > 0) return `${numericHours}h`;
+
+  return "-";
+}
+
+function formatDashboardExpiryTime(expiresAt) {
+  const date = new Date(Number(expiresAt || 0));
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleTimeString("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatDashboardExpiryDate(expiresAt) {
+  const date = new Date(Number(expiresAt || 0));
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleDateString("de-DE");
+}
 export default function App() {
   const [zones, setZones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [showVisitorDashboard, setShowVisitorDashboard] = useState(false);
+  const [visitorReservationsSnapshot, setVisitorReservationsSnapshot] = useState(() =>
+    readVisitorReservationsForDashboard()
+  );
   const [selectedVisitorZoneId, setSelectedVisitorZoneId] = useState(null);
   const [visitorTheme, setVisitorTheme] = useState(() => {
     if (typeof window === "undefined") return "dark";
@@ -76,6 +123,18 @@ export default function App() {
     window.localStorage.setItem("admin-theme", adminTheme);
   }, [adminTheme]);
 
+  useEffect(() => {
+    const loadVisitorReservations = () => {
+      setVisitorReservationsSnapshot(readVisitorReservationsForDashboard());
+    };
+
+    loadVisitorReservations();
+
+    const interval = setInterval(loadVisitorReservations, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+
   const onToggle = useCallback(
     async (spotId) => {
       if (!isAdmin || savingId !== null) return;
@@ -119,7 +178,31 @@ export default function App() {
     () => new Map(zones.map((zone, index) => [zone.ID, `P${index + 1}`])),
     [zones]
   );
+  const visitorDashboardRows = useMemo(() => {
+    const now = Date.now();
 
+    return zones
+      .flatMap((zone, index) => {
+        const zoneKey = String(zone.ID || "");
+        const zoneReservations = visitorReservationsSnapshot[zoneKey] || {};
+        const dashboardZoneLabel = zoneLabelById.get(zone.ID) || zone.code || zone.name || `P${index + 1}`;
+
+        return Object.entries(zoneReservations)
+          .filter(([, reservation]) => Number(reservation?.expiresAt || 0) > now)
+          .map(([slotNumber, reservation]) => ({
+            zone: dashboardZoneLabel,
+            parking: slotNumber,
+            car: reservation?.plate || "-",
+            duration: formatDashboardDuration(reservation?.hours),
+            expiryTime: formatDashboardExpiryTime(reservation?.expiresAt),
+            expiryDate: formatDashboardExpiryDate(reservation?.expiresAt),
+          }));
+      })
+      .sort((a, b) => {
+        if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
+        return Number(a.parking) - Number(b.parking);
+      });
+  }, [zones, visitorReservationsSnapshot, zoneLabelById]);
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-cyan-50 flex items-center justify-center">
@@ -133,41 +216,38 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen ${
-        isAdmin
-          ? isAdminLight
-            ? "bg-gradient-to-br from-slate-100 via-gray-100 to-zinc-100"
-            : "bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950"
-          : isVisitorLight
-            ? "bg-gradient-to-br from-slate-50 via-white to-cyan-50"
-            : "bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950"
-      }`}
+      className={`min-h-screen ${isAdmin
+        ? isAdminLight
+          ? "bg-gradient-to-br from-slate-100 via-gray-100 to-zinc-100"
+          : "bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950"
+        : isVisitorLight
+          ? "bg-gradient-to-br from-slate-50 via-white to-cyan-50"
+          : "bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950"
+        }`}
     >
       <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
         <div
-          className={`mb-6 rounded-[24px] border px-4 py-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] backdrop-blur-md sm:mb-8 sm:px-6 sm:py-5 ${
-            isAdmin
-              ? isAdminLight
-                ? "border-white/70 bg-white/80"
-                : "border-slate-700/80 bg-slate-900/70"
-              : isVisitorLight
-                ? "border-cyan-100/80 bg-white/90"
-                : "border-cyan-300/25 bg-slate-900/55 shadow-[0_18px_45px_rgba(6,182,212,0.18)]"
-          }`}
+          className={`mb-6 rounded-[24px] border px-4 py-4 shadow-[0_12px_35px_rgba(15,23,42,0.06)] backdrop-blur-md sm:mb-8 sm:px-6 sm:py-5 ${isAdmin
+            ? isAdminLight
+              ? "border-white/70 bg-white/80"
+              : "border-slate-700/80 bg-slate-900/70"
+            : isVisitorLight
+              ? "border-cyan-100/80 bg-white/90"
+              : "border-cyan-300/25 bg-slate-900/55 shadow-[0_18px_45px_rgba(6,182,212,0.18)]"
+            }`}
         >
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
             <div className="flex items-center gap-3">
               <div>
                 <h1
-                  className={`text-3xl font-bold tracking-tight md:text-4xl ${
-                    isAdmin
-                      ? isAdminLight
-                        ? "text-slate-800"
-                        : "text-slate-100"
-                      : isVisitorLight
-                        ? "text-slate-800"
-                        : "bg-gradient-to-r from-cyan-200 via-sky-200 to-emerald-200 bg-clip-text text-transparent"
-                  }`}
+                  className={`text-3xl font-bold tracking-tight md:text-4xl ${isAdmin
+                    ? isAdminLight
+                      ? "text-slate-800"
+                      : "text-slate-100"
+                    : isVisitorLight
+                      ? "text-slate-800"
+                      : "bg-gradient-to-r from-cyan-200 via-sky-200 to-emerald-200 bg-clip-text text-transparent"
+                    }`}
                 >
                   Parking System
                 </h1>
@@ -180,39 +260,39 @@ export default function App() {
 
               {isAdmin ? (
                 <span
-                  className={`self-start rounded-full px-3 py-1 text-sm font-medium border ${
-                    isAdminLight
-                      ? "bg-gradient-to-r from-teal-50 to-emerald-50 text-teal-600 border-teal-100"
-                      : "bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 text-cyan-100 border-cyan-300/40"
-                  }`}
+                  className={`self-start rounded-full px-3 py-1 text-sm font-medium border ${isAdminLight
+                    ? "bg-gradient-to-r from-teal-50 to-emerald-50 text-teal-600 border-teal-100"
+                    : "bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 text-cyan-100 border-cyan-300/40"
+                    }`}
                 >
                   Admin
                 </span>
               ) : (
-                <span
-                  className={`self-start rounded-full px-3 py-1 text-sm font-medium flex items-center gap-1 ${
-                    isVisitorLight
-                      ? "border border-cyan-100 bg-gradient-to-r from-cyan-50 to-teal-50 text-cyan-700"
-                      : "border border-cyan-200/35 bg-gradient-to-r from-cyan-500/20 to-emerald-400/20 text-cyan-100"
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => setShowVisitorDashboard(true)}
+                  className={`self-start flex items-center gap-1 rounded-full border px-3 py-1 text-sm font-medium transition-all duration-200 ${isVisitorLight
+                    ? "border-yellow-200 !bg-yellow-400 text-slate-900 shadow-sm hover:!bg-yellow-500"
+                    : "border-yellow-300/70 !bg-yellow-400 text-slate-900 shadow-sm hover:!bg-yellow-500"
+                    }`}
+                  title="Hap dashboardin e rezervimeve"
                 >
                   <Sparkles size={14} />
                   Visitor
-                </span>
+                </button>
               )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div
-                className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 shadow-sm sm:px-5 sm:py-3 ${
-                  isAdmin
-                    ? isAdminLight
-                      ? "border border-emerald-100 bg-gradient-to-r from-emerald-50 to-cyan-50"
-                      : "border border-cyan-300/30 bg-gradient-to-r from-cyan-500/15 to-indigo-500/15"
-                    : isVisitorLight
-                      ? "border border-cyan-100 bg-gradient-to-r from-cyan-50 to-sky-50"
-                      : "border border-cyan-300/25 bg-gradient-to-r from-cyan-500/15 to-emerald-400/15 text-cyan-50"
-                }`}
+                className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 shadow-sm sm:px-5 sm:py-3 ${isAdmin
+                  ? isAdminLight
+                    ? "border border-emerald-100 bg-gradient-to-r from-emerald-50 to-cyan-50"
+                    : "border border-cyan-300/30 bg-gradient-to-r from-cyan-500/15 to-indigo-500/15"
+                  : isVisitorLight
+                    ? "border border-cyan-100 bg-gradient-to-r from-cyan-50 to-sky-50"
+                    : "border border-cyan-300/25 bg-gradient-to-r from-cyan-500/15 to-emerald-400/15 text-cyan-50"
+                  }`}
               >
                 <span className={`text-3xl font-bold ${isAdmin ? (isAdminLight ? "text-emerald-500" : "text-emerald-300") : isVisitorLight ? "text-emerald-500" : "text-emerald-300"}`}>{stats.free}</span>
                 <span className={`${isAdmin ? (isAdminLight ? "text-slate-300" : "text-slate-400") : isVisitorLight ? "text-slate-300" : "text-cyan-100/45"} text-xl`}>/</span>
@@ -224,11 +304,10 @@ export default function App() {
                 <>
                   <button
                     onClick={() => setShowQR(true)}
-                    className={`p-3 rounded-2xl transition border ${
-                      isAdminLight
-                        ? "bg-violet-50 hover:bg-violet-100 text-violet-500 border-violet-100"
-                        : "bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 border-violet-400/40"
-                    }`}
+                    className={`p-3 rounded-2xl transition border ${isAdminLight
+                      ? "bg-violet-50 hover:bg-violet-100 text-violet-500 border-violet-100"
+                      : "bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 border-violet-400/40"
+                      }`}
                     title="QR Code"
                   >
                     <QrCode size={20} />
@@ -236,11 +315,10 @@ export default function App() {
 
                   <button
                     onClick={logout}
-                    className={`flex items-center gap-2 px-5 py-3 font-medium rounded-2xl transition border ${
-                      isAdminLight
-                        ? "bg-rose-50 hover:bg-rose-100 text-rose-500 border-rose-100"
-                        : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border-rose-400/40"
-                    }`}
+                    className={`flex items-center gap-2 px-5 py-3 font-medium rounded-2xl transition border ${isAdminLight
+                      ? "bg-rose-50 hover:bg-rose-100 text-rose-500 border-rose-100"
+                      : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border-rose-400/40"
+                      }`}
                   >
                     <LogOut size={18} />
                     <span>Logout</span>
@@ -251,11 +329,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
-                    isAdminLight
-                      ? "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      : "border border-cyan-300/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25"
-                  }`}
+                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${isAdminLight
+                    ? "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    : "border border-cyan-300/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25"
+                    }`}
                   title="Ndrysho temën admin"
                 >
                   {isAdminLight ? <Moon size={16} /> : <Sun size={16} />}
@@ -266,11 +343,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setVisitorTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
-                    isVisitorLight
-                      ? "border border-cyan-200 bg-white text-slate-700 hover:bg-slate-50"
-                      : "border border-cyan-300/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25"
-                  }`}
+                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${isVisitorLight
+                    ? "border border-cyan-200 bg-white text-slate-700 hover:bg-slate-50"
+                    : "border border-cyan-300/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25"
+                    }`}
                   title="Ndrysho temën"
                 >
                   {isVisitorLight ? <Moon size={16} /> : <Sun size={16} />}
@@ -282,15 +358,14 @@ export default function App() {
         </div>
 
         <div
-          className={`mb-6 rounded-2xl border px-5 py-4 ${
-            isAdmin
-              ? isAdminLight
-                ? "bg-amber-50 border-amber-100 text-amber-700"
-                : "bg-amber-500/15 border-amber-400/40 text-amber-200"
-              : isVisitorLight
-                ? "bg-gradient-to-r from-cyan-50 to-emerald-50 border-cyan-100 text-slate-600"
-                : "border-cyan-300/25 bg-gradient-to-r from-slate-900/70 to-cyan-900/40 text-cyan-100"
-          }`}
+          className={`mb-6 rounded-2xl border px-5 py-4 ${isAdmin
+            ? isAdminLight
+              ? "bg-amber-50 border-amber-100 text-amber-700"
+              : "bg-amber-500/15 border-amber-400/40 text-amber-200"
+            : isVisitorLight
+              ? "bg-gradient-to-r from-cyan-50 to-emerald-50 border-cyan-100 text-slate-600"
+              : "border-cyan-300/25 bg-gradient-to-r from-slate-900/70 to-cyan-900/40 text-cyan-100"
+            }`}
         >
           <p className="text-sm md:text-base">
             {isAdmin
@@ -314,13 +389,12 @@ export default function App() {
         ) : (
           <div className="space-y-4">
             <div
-              className={`rounded-2xl border p-4 backdrop-blur-sm ${
-                isVisitorLight
-                  ? "border-cyan-100/80 bg-white/92 shadow-sm"
-                  : "border-cyan-300/25 bg-slate-900/50 shadow-[0_14px_35px_rgba(2,132,199,0.18)]"
-              }`}
+              className={`rounded-2xl border p-4 backdrop-blur-sm ${isVisitorLight
+                ? "border-cyan-100/80 bg-white/92 shadow-sm"
+                : "border-cyan-300/25 bg-slate-900/50 shadow-[0_14px_35px_rgba(2,132,199,0.18)]"
+                }`}
             >
-              <p className={`mb-3 text-sm font-semibold ${isVisitorLight ? "text-slate-700" : "text-cyan-100"}`}>Zgjidh Lagjen</p>
+              <p className={`mb-3 text-sm font-semibold ${isVisitorLight ? "text-slate-700" : "text-cyan-100"}`}>Zgjedh Zonen</p>
               <div className="flex flex-wrap gap-2">
                 {zones.map((zone) => {
                   const selected = zone.ID === selectedVisitorZone?.ID;
@@ -329,15 +403,12 @@ export default function App() {
                       key={zone.ID}
                       type="button"
                       onClick={() => setSelectedVisitorZoneId(zone.ID)}
-                      className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                        selected
-                          ? isVisitorLight
-                            ? "border-transparent bg-gradient-to-r from-cyan-600 to-sky-500 text-white shadow"
-                            : "border-cyan-200/50 bg-gradient-to-r from-cyan-500 to-indigo-500 text-white shadow-[0_8px_20px_rgba(14,165,233,0.35)]"
-                          : isVisitorLight
-                            ? "border-cyan-100 bg-cyan-50/50 text-slate-700 hover:bg-cyan-100/60"
-                            : "border-cyan-300/25 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20"
-                      }`}
+                      className={`rounded-full border px-4 py-2 text-sm font-semibold transition-all duration-200 ${selected
+                        ? "border-yellow-200 !bg-yellow-400 text-slate-900 shadow-md shadow-yellow-500/30"
+                        : isVisitorLight
+                          ? "border-cyan-100 bg-cyan-50/50 text-slate-700 hover:bg-cyan-100/60"
+                          : "border-cyan-300/25 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/20"
+                        }`}
                     >
                       {zoneLabelById.get(zone.ID) || zone.name}
                     </button>
@@ -357,21 +428,113 @@ export default function App() {
 
         <div className="mt-8 text-center">
           <div
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm shadow-sm ${
-              isAdmin
-                ? isAdminLight
-                  ? "border border-slate-200 bg-white/80 text-slate-400"
-                  : "border border-cyan-300/30 bg-slate-900/60 text-cyan-100/85"
-                : isVisitorLight
-                  ? "border border-slate-200 bg-white/80 text-slate-400"
-                  : "border border-cyan-300/30 bg-slate-900/60 text-cyan-100/85"
-            }`}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm shadow-sm ${isAdmin
+              ? isAdminLight
+                ? "border border-slate-200 bg-white/80 text-slate-400"
+                : "border border-cyan-300/30 bg-slate-900/60 text-cyan-100/85"
+              : isVisitorLight
+                ? "border border-slate-200 bg-white/80 text-slate-400"
+                : "border border-cyan-300/30 bg-slate-900/60 text-cyan-100/85"
+              }`}
           >
             <RefreshCw size={14} className="animate-spin" />
             Auto-refresh çdo 2 sekonda
           </div>
         </div>
       </div>
+
+      {showVisitorDashboard && !isAdmin && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/70 p-3">
+          <div
+            className={`w-full max-w-5xl rounded-2xl border p-4 shadow-2xl ${isVisitorLight
+                ? "border-cyan-200 bg-white text-slate-800"
+                : "border-cyan-300/30 bg-slate-900 text-cyan-50"
+              }`}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Dashboard i rezervimeve</h2>
+                <p className={`mt-1 text-xs ${isVisitorLight ? "text-slate-500" : "text-cyan-100/70"}`}>
+                  Lista e parkingjeve të rezervuara aktualisht.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowVisitorDashboard(false)}
+                className={`rounded-lg border p-2 transition ${isVisitorLight
+                    ? "border-slate-200 text-slate-600 hover:bg-slate-100"
+                    : "border-slate-600 text-cyan-100 hover:bg-slate-800"
+                  }`}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-700/30">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead
+                  className={
+                    isVisitorLight
+                      ? "bg-slate-100 text-slate-700"
+                      : "bg-slate-800 text-cyan-100"
+                  }
+                >
+                  <tr>
+                    <th className="px-3 py-3 font-semibold">Zona</th>
+                    <th className="px-3 py-3 font-semibold">Parkingu</th>
+                    <th className="px-3 py-3 font-semibold">Makina</th>
+                    <th className="px-3 py-3 font-semibold">Kohëzgjatja</th>
+                    <th className="px-3 py-3 font-semibold">Skadimi Ora</th>
+                    <th className="px-3 py-3 font-semibold">Skadimi data</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visitorDashboardRows.length > 0 ? (
+                    visitorDashboardRows.map((row, index) => (
+                      <tr
+                        key={`${row.zone}-${row.parking}-${row.car}-${index}`}
+                        className={`border-t ${isVisitorLight
+                            ? "border-slate-200 hover:bg-slate-50"
+                            : "border-slate-700 hover:bg-slate-800/70"
+                          }`}
+                      >
+                        <td className="px-3 py-3 font-semibold">{row.zone}</td>
+                        <td className="px-3 py-3">{row.parking}</td>
+                        <td className="px-3 py-3">{row.car}</td>
+                        <td className="px-3 py-3">{row.duration}</td>
+                        <td className="px-3 py-3">{row.expiryTime}</td>
+                        <td className="px-3 py-3">{row.expiryDate}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className={`px-3 py-8 text-center text-sm ${isVisitorLight ? "text-slate-500" : "text-cyan-100/70"
+                          }`}
+                      >
+                        Nuk ka rezervime aktive për momentin.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowVisitorDashboard(false)}
+                className="rounded-lg border border-slate-300 !bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:!bg-slate-600"
+              >
+                Mbyll
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
       {showQR && <QRCodeDisplay onClose={() => setShowQR(false)} />}

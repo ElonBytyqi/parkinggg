@@ -14,3 +14,10 @@ entity Spots {
   status        : String(10);   // FREE or OCCUPIED
   updatedAt     : Timestamp;
 }
+
+entity CreditWallets {
+  key ID        : UUID;
+  owner         : String(50);
+  creditBalance : Integer;
+  updatedAt     : Timestamp;
+}

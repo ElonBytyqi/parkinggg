@@ -10,11 +10,10 @@
   },
   "devDependencies": {},
   "scripts": {
-    "start": "cds-serve",
+    "start": "cds-serve --with-mocks --in-memory",
     "start:local": "cds-serve --with-mocks --in-memory",
     "build:frontend": "cd app/parking-web && npm install && npm run build",
-    "postinstall": "npm run build:frontend || true",
-    "deploy:db": "cds deploy --to postgres"
+    "postinstall": "npm run build:frontend"
   },
   "engines": {
     "node": ">=18"
@@ -29,10 +28,6 @@
         "impl": "@cap-js/sqlite",
         "credentials": {
           "database": ":memory:"
-        },
-        "[production]": {
-          "kind": "postgres",
-          "impl": "@cap-js/postgres"
         }
       }
     }

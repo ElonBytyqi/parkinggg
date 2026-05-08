@@ -1,0 +1,4 @@
+node_modules/
+app/parking-web/node_modules/
+.mta_archives/
+gen/

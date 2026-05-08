@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { divIcon } from "leaflet";
-import { AlertTriangle, LocateFixed, Navigation } from "lucide-react";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { MapContainer, Marker, Polygon, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
-import { toggleStatus } from "../../api/parkingApi";
+import { reserveSpot, releaseSpot, getCreditWallet, deductCredits } from "../../api/parkingApi";
 
 const schoolMapCenter = [42.641419406177526, 21.101972778158114];
 const envMapCenter = [
@@ -191,13 +191,16 @@ const outsideOverlayMask = [
 ];
 const parkingSlotWidthMeters = 2.5;
 const parkingSlotInsetRatio = 0.08;
+const accessibleSlotNumber = 1;
+const accessibleSlotExtraWidthRatio = 0.22;
+const topUpAmounts = [2, 5, 10, 20, 50];
 const reservationOptions = [
   { hours: 1, amount: 0.5, label: "1 ore (0.50€)" },
   { hours: 2, amount: 1.0, label: "2 ore (1.00€)" },
   { hours: 3, amount: 1.5, label: "3 ore (1.50€)" },
   { hours: 24, amount: 5.0, label: "24h (5.00€)" },
   { hours: 24 * 7, amount: 20.0, label: "Javor - 7 dite (20.00€)" },
-  { hours: 24 * 365, amount: 70.0, label: "Banoret rezident (70.00€/vit)" },
+  { hours: 24 * 365, amount: 70.0, label: "Banoret rezident (70.00€/muaj)" },
 ];
 const reservationStorageKey = "visitor-slot-reservations";
 const lastPlateStorageKey = "visitor-last-plate";
@@ -321,6 +324,20 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
   const [bookingSlot, setBookingSlot] = useState(null);
   const [bookingTab, setBookingTab] = useState("payment");
   const [selectedHours, setSelectedHours] = useState(1);
+  const [parkingNumberInput, setParkingNumberInput] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("aparat");
+  const [creditWallet, setCreditWallet] = useState(null);
+  const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
+  const [selectedTopUpEuro, setSelectedTopUpEuro] = useState(5);
+  const [cardHolder, setCardHolder] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
+  const [topUpError, setTopUpError] = useState("");
+  const [isProcessingTopUp, setIsProcessingTopUp] = useState(false);
+  const creditPerEuro = 100;
+  const creditBalance = Number(creditWallet?.creditBalance || 0);
+  const creditBalanceEuro = (creditBalance / creditPerEuro).toFixed(2);
   const [plateNumber, setPlateNumber] = useState(() => readStoredPlate());
   const [plateError, setPlateError] = useState("");
   const [reservationError, setReservationError] = useState("");
@@ -337,6 +354,46 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
   const occupiedSpots = spots.filter((s) => s.status !== "FREE");
   const selectedTile = tileOptions[mapStyle];
   const isSatelliteStyle = mapStyle === "googleSatellite";
+  const openTopUpModal = () => {
+    setTopUpError("");
+    setSelectedTopUpEuro(5);
+    setIsTopUpModalOpen(true);
+  };
+
+  const closeTopUpModal = () => {
+    setIsTopUpModalOpen(false);
+    setTopUpError("");
+    setCardHolder("");
+    setCardNumber("");
+    setCardExpiry("");
+    setCardCvv("");
+  };
+
+  const handleTopUpSubmit = (event) => {
+    event.preventDefault();
+
+    if (!cardHolder.trim() || !cardNumber.trim() || !cardExpiry.trim() || !cardCvv.trim()) {
+      setTopUpError("Ju lutem plotesoni te gjitha te dhenat e karteles.");
+      return;
+    }
+
+    setTopUpError("");
+    setIsProcessingTopUp(true);
+
+    window.setTimeout(() => {
+      const addedCredits = selectedTopUpEuro * creditPerEuro;
+
+      setCreditWallet((prev) => ({
+        ...(prev || {}),
+        ID: prev?.ID || "demo-wallet",
+        creditBalance: Number(prev?.creditBalance || 0) + addedCredits,
+      }));
+
+      setReservationError("");
+      setIsProcessingTopUp(false);
+      closeTopUpModal();
+    }, 700);
+  };
   const generatedSlotCount = useMemo(() => {
     const lineOneLength = distanceMeters(schoolReferenceLine[0], schoolReferenceLine[1]);
     const lineTwoLength = distanceMeters(schoolReferenceLineTwo[0], schoolReferenceLineTwo[1]);
@@ -380,7 +437,9 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
     () => reservationOptions.find((option) => option.hours === selectedHours) || reservationOptions[0],
     [selectedHours]
   );
-  const selectedReservationAmount = selectedReservationOption.amount;
+
+  const selectedReservationAmount = Number(selectedReservationOption?.amount || 0);
+  const selectedReservationCredits = Math.round(selectedReservationAmount * creditPerEuro);
   const activeBookingReservation = bookingSlot ? localReservations[String(bookingSlot.number)] : null;
   const bookingReservationMsLeft = Math.max(0, Number(activeBookingReservation?.expiresAt || 0) - nowTimestamp);
   const bookingReservationMinutesLeft = Math.ceil(bookingReservationMsLeft / 60000);
@@ -405,13 +464,31 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
 
     const appendSlots = (topLine, bottomLine, slotCount, startNumber) => {
       for (let i = 0; i < slotCount; i += 1) {
-        const t0 = (i + parkingSlotInsetRatio) / slotCount;
-        const t1 = (i + 1 - parkingSlotInsetRatio) / slotCount;
+        const slotNumber = startNumber + i;
+
+        let t0 = (i + parkingSlotInsetRatio) / slotCount;
+        let t1 = (i + 1 - parkingSlotInsetRatio) / slotCount;
+
+        // Make parking slot 1 a little wider
+        if (startNumber === 1 && slotNumber === accessibleSlotNumber) {
+          t1 = Math.min(
+            (i + 1 - parkingSlotInsetRatio + accessibleSlotExtraWidthRatio) / slotCount,
+            1
+          );
+        }
+
+        // Shift slot 2 a little so it starts after the wider accessible slot
+        if (startNumber === 1 && slotNumber === accessibleSlotNumber + 1) {
+          t0 = Math.min(
+            (i + parkingSlotInsetRatio + accessibleSlotExtraWidthRatio) / slotCount,
+            1
+          );
+        }
+
         const p1 = pointOn(topLine, t0);
         const p2 = pointOn(topLine, t1);
         const p3 = pointOn(bottomLine, t1);
         const p4 = pointOn(bottomLine, t0);
-        const slotNumber = startNumber + i;
         const spot = spotByNumber.get(slotNumber);
         const reservation = localReservations[String(slotNumber)];
         const backendStatus = String(spot?.status || "FREE").toUpperCase();
@@ -426,6 +503,7 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
         slots.push({
           id: spot?.ID || `virtual-${slotNumber}`,
           number: slotNumber,
+          isAccessible: slotNumber === accessibleSlotNumber,
           isFree,
           reservation,
           isExpiringSoon,
@@ -463,21 +541,21 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
       schoolReferenceLineSix,
       generatedSlotCountFive,
       generatedSlotCount +
-        generatedSlotCountTwo +
-        generatedSlotCountThree +
-        generatedSlotCountFour +
-        1
+      generatedSlotCountTwo +
+      generatedSlotCountThree +
+      generatedSlotCountFour +
+      1
     );
     appendSlots(
       schoolReferenceLineEleven,
       schoolReferenceLineTwelve,
       generatedSlotCountSix,
       generatedSlotCount +
-        generatedSlotCountTwo +
-        generatedSlotCountThree +
-        generatedSlotCountFour +
-        generatedSlotCountFive +
-        1
+      generatedSlotCountTwo +
+      generatedSlotCountThree +
+      generatedSlotCountFour +
+      generatedSlotCountFive +
+      1
     );
 
     return slots;
@@ -492,8 +570,13 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
     nowTimestamp,
     spots,
   ]);
-  const quickFreeSlots = useMemo(
-    () => zoneSlotPolygons.filter((slot) => slot.isFree).slice(0, 8),
+  const selectedZoneFreeCount = useMemo(
+    () => zoneSlotPolygons.filter((slot) => slot.isFree).length,
+    [zoneSlotPolygons]
+  );
+
+  const selectedZoneOccupiedCount = useMemo(
+    () => zoneSlotPolygons.filter((slot) => !slot.isFree).length,
     [zoneSlotPolygons]
   );
   const hasAnyActiveReservation = useMemo(
@@ -512,6 +595,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
     setSelectedSlot(null);
     setBookingSlot(null);
     setSelectedHours(1);
+    setParkingNumberInput("");
+    setPaymentMethod("aparat");
     setPlateNumber(readStoredPlate());
     setPlateError("");
     setReservationError("");
@@ -534,6 +619,28 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
       window.localStorage.setItem(reservationStorageKey, JSON.stringify(stored));
     }
   }, [zone?.ID]);
+  useEffect(() => {
+    const timer = setInterval(() => setNowTimestamp(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCreditWallet = async () => {
+      try {
+        const wallet = await getCreditWallet();
+        if (isMounted) setCreditWallet(wallet);
+      } catch {
+        if (isMounted) setCreditWallet(null);
+      }
+    };
+
+    loadCreditWallet();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   useEffect(() => {
     const zoneKey = String(zone?.ID || "");
     if (!zoneKey) return;
@@ -562,7 +669,7 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
           String(mappedSpot?.status || "").toUpperCase() === "OCCUPIED"
         ) {
           try {
-            await toggleStatus(slotId);
+            await releaseSpot(slotId);
           } catch {
             // Retry on next interval if backend call fails.
             continue;
@@ -626,10 +733,7 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
     window.addEventListener("resize", updateMobile);
     return () => window.removeEventListener("resize", updateMobile);
   }, []);
-  useEffect(() => {
-    const timer = setInterval(() => setNowTimestamp(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+
   const requestUserLocation = ({ centerMap = false } = {}) => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -642,7 +746,7 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
           setRecenterSignal((s) => s + 1);
         }
       },
-      () => {},
+      () => { },
       {
         enableHighAccuracy: false,
         maximumAge: 30000,
@@ -676,7 +780,54 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
     setMapViewZoom(21);
     setRecenterSignal((s) => s + 1);
   };
+  const selectParkingFromInput = () => {
+    const slotNumber = Number(parkingNumberInput);
 
+    if (!Number.isInteger(slotNumber) || slotNumber <= 0) {
+      setMyCarMessage("Shkruaj numrin e parkingut.");
+      return;
+    }
+
+    const slot = zoneSlotPolygons.find((item) => Number(item.number) === slotNumber);
+
+    if (!slot) {
+      setMyCarMessage(`Parkingu ${slotNumber} nuk ekziston ne kete zone.`);
+      return;
+    }
+
+    const reservation = localReservations[String(slot.number)];
+    const hasActiveMyReservation = Boolean(
+      reservation?.expiresAt && reservation.expiresAt > Date.now()
+    );
+
+    if (!slot.isFree) {
+      if (hasActiveMyReservation) {
+        setOccupiedWarning(null);
+        setBookingTab("navigation");
+        setBookingSlot(slot);
+        setSelectedSlot(slot);
+        setMapViewCenter(slot.center);
+        setMapViewZoom(21);
+        setRecenterSignal((s) => s + 1);
+        return;
+      }
+
+      setOccupiedWarning({ number: slot.number });
+      return;
+    }
+
+    setOccupiedWarning(null);
+    setSelectedSlot(slot);
+    setBookingTab("payment");
+    setBookingSlot(slot);
+    setSelectedHours(1);
+    setPlateNumber(readStoredPlate());
+    setPlateError("");
+    setReservationError("");
+    setMapViewCenter(slot.center);
+    setMapViewZoom(21);
+    setRecenterSignal((s) => s + 1);
+  };
   const openDirectionsToSlot = (slot) => {
     if (!slot?.center) return;
 
@@ -769,6 +920,13 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
       setReservationError("Ky parking nuk eshte i lidhur me backend. Shtoje si spot real ne server.");
       return;
     }
+    if (paymentMethod === "kredi" && creditBalance < selectedReservationCredits) {
+      setReservationError(
+        `Nuk keni kredi te mjaftueshme. Kerkohen ${selectedReservationCredits} kredi, ndersa keni ${creditBalance} kredi.`
+      );
+      openTopUpModal();
+      return;
+    }
 
     try {
       setIsSubmittingReservation(true);
@@ -781,10 +939,29 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
 
       // Only toggle when first reserving a FREE slot.
       // If user is extending an active reservation, keep backend as OCCUPIED.
-      if (!hasActiveExistingReservation && bookingSpotStatus === "FREE") {
-        await toggleStatus(slotId);
+      if (!hasActiveExistingReservation) {
+        await reserveSpot(slotId);
       }
-
+      if (paymentMethod === "kredi") {
+        if (creditWallet?.ID && creditWallet.ID !== "demo-wallet") {
+          try {
+            const updatedWallet = await deductCredits(creditWallet.ID, selectedReservationCredits);
+            setCreditWallet(updatedWallet);
+          } catch {
+            setCreditWallet((prev) => ({
+              ...(prev || {}),
+              ID: prev?.ID || "demo-wallet",
+              creditBalance: Number(prev?.creditBalance || 0) - selectedReservationCredits,
+            }));
+          }
+        } else {
+          setCreditWallet((prev) => ({
+            ...(prev || {}),
+            ID: prev?.ID || "demo-wallet",
+            creditBalance: Number(prev?.creditBalance || 0) - selectedReservationCredits,
+          }));
+        }
+      }
       const baseTime = hasActiveExistingReservation
         ? Number(activeExistingReservation.expiresAt)
         : Date.now();
@@ -794,6 +971,8 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
         plate: normalizedPlate,
         hours: selectedHours,
         amount: selectedReservationAmount,
+        credits: selectedReservationCredits,
+        paymentMethod,
         createdAt: Date.now(),
         expiresAt,
       };
@@ -810,15 +989,24 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
       };
       window.localStorage.setItem(reservationStorageKey, JSON.stringify(nextStored));
 
-      setBookingTab("navigation");
+      setBookingSlot(null);
+      setSelectedSlot(null);
+      setBookingTab("payment");
       setSelectedHours(1);
+      setPaymentMethod("aparat");
       setPlateNumber(normalizedPlate);
       setPlateError("");
       setReservationError("");
       setOccupiedWarning(null);
       window.localStorage.setItem(lastPlateStorageKey, normalizedPlate);
     } catch (error) {
-      setReservationError("Rezervimi deshtoi ne backend. Provo perseri.");
+      const message = String(error?.message || "");
+
+      if (message.includes("409")) {
+        setReservationError("Ky parking sapo u rezervua nga dikush tjeter. Ju lutem zgjidhni nje parking tjeter.");
+      } else {
+        setReservationError("Rezervimi deshtoi ne backend. Provo perseri.");
+      }
     } finally {
       setIsSubmittingReservation(false);
     }
@@ -833,11 +1021,10 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
 
   return (
     <div
-      className={`parking-visitor-card w-full p-3 sm:rounded-3xl sm:p-4 ${
-        isLightTheme
-          ? "rounded-2xl border border-cyan-100/80 bg-white/95 shadow-sm"
-          : "rounded-2xl border border-cyan-300/25 bg-slate-900/55 shadow-[0_18px_45px_rgba(8,145,178,0.2)] backdrop-blur-md"
-      }`}
+      className={`parking-visitor-card w-full p-3 sm:rounded-3xl sm:p-4 ${isLightTheme
+        ? "rounded-2xl border border-cyan-100/80 bg-white/95 shadow-sm"
+        : "rounded-2xl border border-cyan-300/25 bg-slate-900/55 shadow-[0_18px_45px_rgba(8,145,178,0.2)] backdrop-blur-md"
+        }`}
     >
       <div className={`mb-3 flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between ${isLightTheme ? "text-gray-600" : "text-cyan-100/85"}`}>
         <div className="min-w-0">
@@ -846,80 +1033,80 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
-            className={`rounded-full px-2.5 py-1 text-xs font-medium sm:text-sm ${
-              isLightTheme
-                ? "bg-emerald-50 text-emerald-700"
-                : "border border-emerald-300/35 bg-emerald-400/15 text-emerald-200"
-            }`}
+            className={`rounded-full px-2.5 py-1 text-xs font-medium sm:text-sm ${isLightTheme
+              ? "bg-emerald-50 text-emerald-700"
+              : "border border-emerald-300/35 bg-emerald-400/15 text-emerald-200"
+              }`}
           >
-            {freeSpots.length} të lira
+            {selectedZoneFreeCount} të lira
           </span>
           <span
-            className={`rounded-full px-2.5 py-1 text-xs font-medium sm:text-sm ${
-              isLightTheme
-                ? "bg-rose-50 text-rose-600"
-                : "border border-rose-300/35 bg-rose-400/15 text-rose-200"
-            }`}
+            className={`rounded-full px-2.5 py-1 text-xs font-medium sm:text-sm ${isLightTheme
+              ? "bg-rose-50 text-rose-600"
+              : "border border-rose-300/35 bg-rose-400/15 text-rose-200"
+              }`}
           >
-            {occupiedSpots.length} të zëna
+            {selectedZoneOccupiedCount} të zëna
           </span>
         </div>
       </div>
-      <div className="mb-2 flex items-center">
-        <span
-          className={`rounded-full px-3 py-1.5 text-sm font-bold tracking-wide shadow-sm ${
-            isLightTheme
-              ? "border border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 text-cyan-800"
-              : "border border-cyan-300/40 bg-gradient-to-r from-cyan-500/20 to-sky-500/20 text-cyan-100"
-          }`}
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            selectParkingFromInput();
+          }}
+          className="flex flex-1 items-center gap-2"
         >
-          Selekto parkingun
-        </span>
-      </div>
-      {hasAnyActiveReservation && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label
+            htmlFor="parkingNumberInput"
+            className={`shrink-0 text-sm font-semibold ${isLightTheme ? "text-slate-700" : "text-cyan-100"
+              }`}
+          >
+            Parkingu:
+          </label>
+
+          <input
+            id="parkingNumberInput"
+            type="number"
+            min="1"
+            inputMode="numeric"
+            value={parkingNumberInput}
+            onChange={(event) => setParkingNumberInput(event.target.value)}
+            placeholder="p.sh. 6"
+            className={`h-9 w-24 rounded-lg border px-3 text-sm font-semibold outline-none ${isLightTheme
+              ? "border-slate-300 bg-white text-slate-800 focus:border-cyan-400"
+              : "border-cyan-300/30 bg-slate-800 text-cyan-50 focus:border-cyan-300"
+              }`}
+          />
+
+          <button
+            type="submit"
+            className="h-9 rounded-lg border border-cyan-300/60 !bg-cyan-600 px-3 text-xs font-semibold text-white transition-all duration-200 hover:!bg-cyan-700 hover:shadow-md hover:shadow-cyan-500/25"
+          >
+            Zgjidh
+          </button>
+        </form>
+
+        {hasAnyActiveReservation && (
           <button
             type="button"
             onClick={findMyCar}
-            className="rounded-full border border-emerald-300/70 bg-gradient-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-emerald-400 hover:to-green-400"
+            className="shrink-0 rounded-lg border border-emerald-300/70 !bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all duration-200 hover:!bg-emerald-700 hover:shadow-md hover:shadow-emerald-500/25"
           >
             Gjej veturen time
           </button>
-        </div>
-      )}
-      {quickFreeSlots.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          {quickFreeSlots.map((slot) => (
-            <button
-              key={`quick-free-${slot.id}`}
-              type="button"
-              onClick={() => {
-                setSelectedSlot(slot);
-                setBookingSlot(slot);
-                setBookingTab("navigation");
-                setOccupiedWarning(null);
-                setMapViewCenter(slot.center);
-                setMapViewZoom(21);
-                setRecenterSignal((s) => s + 1);
-              }}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                isLightTheme
-                  ? "border-sky-300 bg-gradient-to-r from-sky-50 to-cyan-50 text-sky-700 hover:from-sky-100 hover:to-cyan-100"
-                  : "border-sky-200/90 bg-gradient-to-r from-sky-300/45 to-cyan-300/45 text-white hover:from-sky-300/60 hover:to-cyan-300/60"
-              }`}
-            >
-              P{slot.number}
-            </button>
-          ))}
-        </div>
-      )}
+        )}
+      </div>
+
+
+
 
       <div
-        className={`relative h-[68vh] min-h-[460px] w-full overflow-hidden rounded-2xl sm:h-[620px] ${
-          isLightTheme
-            ? "border border-cyan-100 bg-gradient-to-br from-cyan-50/50 to-sky-50/40"
-            : "border border-cyan-300/30 bg-gradient-to-br from-slate-900/70 via-cyan-950/40 to-indigo-950/45"
-        }`}
+        className={`relative h-[68vh] min-h-[460px] w-full overflow-hidden rounded-2xl sm:h-[620px] ${isLightTheme
+          ? "border border-cyan-100 bg-gradient-to-br from-cyan-50/50 to-sky-50/40"
+          : "border border-cyan-300/30 bg-gradient-to-br from-slate-900/70 via-cyan-950/40 to-indigo-950/45"
+          }`}
       >
         <MapContainer
           center={mapViewCenter}
@@ -1038,6 +1225,7 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                     return;
                   }
                   setOccupiedWarning(null);
+                  setParkingNumberInput(String(slot.number));
                   setSelectedSlot(slot);
                   setBookingTab("payment");
                   setBookingSlot(slot);
@@ -1048,35 +1236,51 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                 },
               }}
               pathOptions={{
-                color: selectedSlot?.number === slot.number
-                  ? "#f59e0b"
-                  : slot.isExpiringSoon
+                color: slot.isAccessible
+                  ? selectedSlot?.number === slot.number
+                    ? "#0ea5e9"
+                    : "#38bdf8"
+                  : selectedSlot?.number === slot.number
                     ? "#f59e0b"
-                    : slot.isFree
-                      ? "#22c55e"
-                      : "#dc2626",
-                weight: selectedSlot?.number === slot.number || slot.isExpiringSoon ? 3 : 2,
+                    : slot.isExpiringSoon
+                      ? "#f59e0b"
+                      : slot.isFree
+                        ? "#22c55e"
+                        : "#dc2626",
+                weight: slot.isAccessible
+                  ? 3
+                  : selectedSlot?.number === slot.number || slot.isExpiringSoon
+                    ? 3
+                    : 2,
                 opacity: slot.isExpiringSoon ? 0.75 + slot.warningPulse * 0.25 : 1,
-                fillOpacity: selectedSlot?.number === slot.number
-                  ? isSatelliteStyle
-                    ? 0.88
-                    : 0.52
-                  : slot.isExpiringSoon
-                    ? (isSatelliteStyle ? 0.45 : 0.3) + slot.warningPulse * 0.35
-                  : slot.isFree
+                fillOpacity: slot.isAccessible
+                  ? selectedSlot?.number === slot.number
+                    ? (isSatelliteStyle ? 0.88 : 0.42)
+                    : (isSatelliteStyle ? 0.72 : 0.28)
+                  : selectedSlot?.number === slot.number
                     ? isSatelliteStyle
-                      ? 0.62
-                      : 0.18
-                    : isSatelliteStyle
-                      ? 0.72
-                      : 0.28,
-                fillColor: selectedSlot?.number === slot.number
-                  ? "#fbbf24"
-                  : slot.isExpiringSoon
-                    ? "#f59e0b"
-                    : slot.isFree
-                      ? "#22c55e"
-                      : "#ef4444",
+                      ? 0.88
+                      : 0.52
+                    : slot.isExpiringSoon
+                      ? (isSatelliteStyle ? 0.45 : 0.3) + slot.warningPulse * 0.35
+                      : slot.isFree
+                        ? isSatelliteStyle
+                          ? 0.62
+                          : 0.18
+                        : isSatelliteStyle
+                          ? 0.72
+                          : 0.28,
+                fillColor: slot.isAccessible
+                  ? selectedSlot?.number === slot.number
+                    ? "#38bdf8"
+                    : "#60a5fa"
+                  : selectedSlot?.number === slot.number
+                    ? "#fbbf24"
+                    : slot.isExpiringSoon
+                      ? "#f59e0b"
+                      : slot.isFree
+                        ? "#22c55e"
+                        : "#ef4444",
               }}
             />
           ))}
@@ -1087,34 +1291,71 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                 position={slot.center}
                 icon={divIcon({
                   className: "slot-number-label",
-                  html: `
-                    <div style="
-                      width: ${isMobile ? 18 : 20}px;
-                      height: ${isMobile ? 18 : 20}px;
-                      border-radius: 9999px;
-                      background: ${
-                        selectedSlot?.number === slot.number
-                          ? "rgba(245,158,11,0.95)"
-                          : "rgba(15,23,42,0.72)"
-                      };
-                      color: ${selectedSlot?.number === slot.number ? "#0f172a" : "white"};
-                      font-size: ${isMobile ? 9 : 10}px;
-                      font-weight: 700;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-                      border: ${
-                        selectedSlot?.number === slot.number
-                          ? "2px solid rgba(15,23,42,0.9)"
-                          : "1px solid rgba(255,255,255,0.8)"
-                      };
-                    ">
-                      ${slot.number}
-                    </div>
-                  `,
-                  iconSize: [isMobile ? 18 : 20, isMobile ? 18 : 20],
-                  iconAnchor: [isMobile ? 9 : 10, isMobile ? 9 : 10],
+                  html: slot.isAccessible
+                    ? `
+      <div style="
+        width: ${isMobile ? 42 : 48}px;
+        height: ${isMobile ? 42 : 48}px;
+        border-radius: 9999px;
+        background: #2563eb;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+        border: 3px solid white;
+      ">
+        <svg
+          width="${isMobile ? 28 : 32}"
+          height="${isMobile ? 28 : 32}"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="white"
+          stroke-width="2.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="9" cy="4" r="2.2"></circle>
+          <path d="M9 7v5h5"></path>
+          <path d="M10 12l2.5 5"></path>
+          <path d="M7.5 10.5a5.5 5.5 0 1 0 6.7 7.9"></path>
+          <path d="M14 12h3l2 5"></path>
+        </svg>
+      </div>
+    `
+                    : `
+      <div style="
+        width: ${isMobile ? 18 : 20}px;
+        height: ${isMobile ? 18 : 20}px;
+        border-radius: 9999px;
+        background: ${selectedSlot?.number === slot.number
+                      ? "#f59e0b"
+                      : "rgba(15,23,42,0.72)"
+                    };
+        color: ${selectedSlot?.number === slot.number
+                      ? "#0f172a"
+                      : "white"
+                    };
+        font-size: ${isMobile ? 9 : 10}px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+        border: ${selectedSlot?.number === slot.number
+                      ? "2px solid rgba(15,23,42,0.9)"
+                      : "1px solid rgba(255,255,255,0.8)"
+                    };
+      ">
+        ${slot.number}
+      </div>
+    `,
+                  iconSize: slot.isAccessible
+                    ? [isMobile ? 42 : 48, isMobile ? 42 : 48]
+                    : [isMobile ? 18 : 20, isMobile ? 18 : 20],
+                  iconAnchor: slot.isAccessible
+                    ? [isMobile ? 21 : 24, isMobile ? 21 : 24]
+                    : [isMobile ? 9 : 10, isMobile ? 9 : 10],
                 })}
                 interactive={false}
                 zIndexOffset={1000}
@@ -1223,184 +1464,272 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
         </MapContainer>
         {bookingSlot && (
           <div
-            className={`${isMobile ? "fixed inset-0" : "absolute inset-0"} z-[970] flex bg-slate-950/65 p-2 sm:p-3 ${
-              isMobile ? "items-end justify-center" : "items-center justify-center"
-            }`}
+            className={`${isMobile ? "fixed inset-0" : "absolute inset-0"} z-[970] flex bg-slate-950/65 p-2 sm:p-3 ${isMobile ? "items-end justify-center" : "items-center justify-center"
+              }`}
           >
             <div
-              className={`w-full rounded-2xl border shadow-2xl ${
-                isMobile ? "max-h-[82dvh] max-w-[96vw] p-3" : "max-w-sm p-4"
-              } ${
-                isLightTheme
+              className={`w-full rounded-2xl border shadow-2xl ${isMobile ? "max-h-[82dvh] max-w-[96vw] p-3" : "max-w-sm p-4"
+                } ${isLightTheme
                   ? "border-cyan-200 bg-white text-slate-800"
                   : "border-cyan-300/30 bg-slate-900 text-cyan-50"
-              }`}
+                }`}
             >
               <div className={`${isMobile ? "max-h-[66dvh] overflow-y-auto pr-1" : ""}`}>
-                <div className={`${isMobile ? "mb-2" : "mb-1"} text-sm font-semibold`}>Parking {bookingSlot.number}</div>
-                <div className={`mb-3 text-xs ${isLightTheme ? "text-slate-500" : "text-cyan-100/70"}`}>
-                  Menaxho pagesen dhe navigimin ne nje vend. Zgjidh kohezgjatjen e qendrimit.
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className={`${isMobile ? "mb-1" : "mb-0.5"} text-sm font-semibold`}>
+                      Zona {zoneLabel || zone?.code || zone?.name}
+                    </div>
+
+                    <div className="text-xs font-semibold text-cyan-100/90">
+                      Parking {bookingSlot.number}
+                    </div>
+
+                    <div className={`mt-1 text-xs ${isLightTheme ? "text-slate-500" : "text-cyan-100/70"}`}>
+                      Menaxho pagesen dhe navigimin ne nje vend.
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <div className="text-xs font-bold text-white">
+                      {creditBalance} kredi
+                    </div>
+                    <div className="text-[11px] text-cyan-100/70">
+                      me vlere {creditBalanceEuro}€
+                    </div>
+                  </div>
                 </div>
                 {bookingHasMyActiveReservation && (
                   <div
-                    className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-                      isLightTheme
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                        : "border-emerald-300/60 bg-emerald-500/15 text-emerald-100"
-                    }`}
+                    className={`mb-3 rounded-lg border px-3 py-2 text-xs ${isLightTheme
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-emerald-300/60 bg-emerald-500/15 text-emerald-100"
+                      }`}
                   >
                     Rezervimi yt eshte aktiv ({bookingReservationMinutesLeft} min te mbetura).
                   </div>
                 )}
-                <div className="mb-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBookingTab("navigation")}
-                  className={`rounded-lg px-3 py-2 font-semibold ${isMobile ? "text-xs" : "text-sm"} ${
-                    bookingTab === "navigation"
-                      ? "bg-cyan-500 text-white"
-                      : isLightTheme
-                        ? "border border-slate-300 text-slate-700 hover:bg-slate-100"
-                        : "border border-slate-600 text-cyan-100 hover:bg-slate-800"
-                  }`}
-                >
-                  Navigim
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBookingTab("payment")}
-                  className={`rounded-lg px-3 py-2 font-semibold ${isMobile ? "text-xs" : "text-sm"} ${
-                    bookingTab === "payment"
-                      ? "bg-cyan-500 text-white"
-                      : isLightTheme
-                        ? "border border-slate-300 text-slate-700 hover:bg-slate-100"
-                        : "border border-slate-600 text-cyan-100 hover:bg-slate-800"
-                  }`}
-                >
-                  Pagesa
-                </button>
+                <div className={`mb-3 grid gap-2 ${bookingTab === "navigation" ? "grid-cols-1" : "grid-cols-2"}`}>
+                  {bookingTab !== "navigation" && (
+                    <button
+                      type="button"
+                      onClick={() => setBookingTab("navigation")}
+                      className={`rounded-lg border px-3 py-2 font-semibold text-white transition-all duration-200 ${isMobile ? "text-xs" : "text-sm"} ${bookingTab === "navigation"
+                        ? "border-sky-200 !bg-sky-600 shadow-md shadow-sky-500/30"
+                        : "border-sky-300/50 !bg-sky-500 hover:!bg-sky-600 hover:shadow-md hover:shadow-sky-500/25"
+                        }`}
+                    >
+                      Navigim
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setBookingTab("payment")}
+                    className={`rounded-lg border px-3 py-2 font-semibold text-slate-900 transition-all duration-200 ${isMobile ? "text-xs" : "text-sm"}
+                     ${bookingTab === "payment"
+                        ? "border-yellow-200 !bg-yellow-400 shadow-md shadow-yellow-500/30"
+                        : "border-yellow-300/60 !bg-yellow-300 hover:!bg-yellow-400 hover:shadow-md hover:shadow-yellow-500/25"
+                      }`}
+
+                  >
+                    Pagesa
+                  </button>
+
                 </div>
+
                 {bookingTab === "navigation" ? (
                   <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => openDirectionsToSlot(bookingSlot)}
-                    className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-sky-500 px-3 py-2 text-sm font-semibold text-white hover:from-cyan-400 hover:to-sky-400"
-                  >
-                    Nis Navigimin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openGooglePin(bookingSlot)}
-                    className="w-full rounded-lg border border-indigo-300/60 bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2 text-sm font-semibold text-white hover:from-indigo-400 hover:to-violet-400"
-                  >
-                    Hap ne Google Pin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      copyCoordinates(bookingSlot).catch(() => {});
-                    }}
-                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
-                      isLightTheme
-                        ? "border-slate-300 text-slate-700 hover:bg-slate-100"
-                        : "border-slate-600 text-cyan-100 hover:bg-slate-800"
-                    }`}
-                  >
-                    Copy Coordinates
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => openDirectionsToSlot(bookingSlot)}
+                      className="w-full rounded-lg border border-sky-200 !bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-sky-500/25 transition-all duration-200 hover:!bg-sky-700 hover:shadow-lg hover:shadow-sky-500/35"
+                    >
+                      Nis navigimin
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openGooglePin(bookingSlot)}
+                      className="w-full rounded-lg border border-indigo-200 !bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/25 transition-all duration-200 hover:!bg-indigo-700 hover:shadow-lg hover:shadow-indigo-500/35"
+                    >
+                      Hap në Google Pin
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        copyCoordinates(bookingSlot).catch(() => { });
+                      }}
+                      className="w-full rounded-lg border border-cyan-200 !bg-cyan-600 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-cyan-500/25 transition-all duration-200 hover:!bg-cyan-700 hover:shadow-lg hover:shadow-cyan-500/35"
+                    >
+                      Kopjo koordinatat
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBookingTab("payment")}
+                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-500 !bg-slate-700 px-3 py-2 text-sm font-semibold text-white transition-all duration-200 hover:!bg-slate-600"
+                    >
+                      <ArrowLeft size={16} />
+                      Mbrapa
+                    </button>
                   </div>
+
                 ) : (
                   <form onSubmit={submitReservation}>
-                  <div className="reservation-options-scroll mb-3 max-h-44 overflow-y-auto pr-1">
-                    <div className="grid grid-cols-1 gap-2">
-                    {reservationOptions.map((option) => (
-                      <label
-                        key={option.hours}
-                        className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                          selectedHours === option.hours
-                            ? "border-cyan-400 bg-cyan-500/15"
-                            : isLightTheme
-                              ? "border-slate-200 bg-slate-50"
-                              : "border-slate-700 bg-slate-800/70"
-                        }`}
-                      >
-                        <span>{option.label}</span>
-                        <input
-                          type="radio"
-                          name="reservation-hours"
-                          className="h-4 w-4"
-                          checked={selectedHours === option.hours}
-                          onChange={() => setSelectedHours(option.hours)}
-                        />
-                      </label>
-                    ))}
+                    <div className="reservation-options-scroll mb-3 max-h-44 overflow-y-auto pr-1">
+                      <div className="grid grid-cols-1 gap-2">
+                        {reservationOptions.map((option) => (
+                          <label
+                            key={option.hours}
+                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm ${selectedHours === option.hours
+                              ? "border-cyan-400 bg-cyan-500/15"
+                              : isLightTheme
+                                ? "border-slate-200 bg-slate-50"
+                                : "border-slate-700 bg-slate-800/70"
+                              }`}
+                          >
+                            <span>
+                              {option.label}
+                              <span className={`${isLightTheme ? "text-slate-600" : "text-cyan-100/80"} ml-1 font-semibold`}>
+                                - {Math.round(option.amount * creditPerEuro)} kredi
+                              </span>
+                            </span>
+                            <input
+                              type="radio"
+                              name="reservation-hours"
+                              className="h-4 w-4"
+                              checked={selectedHours === option.hours}
+                              onChange={() => setSelectedHours(option.hours)}
+                            />
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                  <label className="mb-2 block text-xs font-semibold">Targa e kerres</label>
-                  <input
-                    type="text"
-                    value={plateNumber}
-                    onChange={(event) => {
-                      const formatted = formatPlateInput(event.target.value);
-                      setPlateNumber(formatted);
-                      setPlateError(getPlateValidationMessage(formatted));
-                    }}
-                    placeholder="p.sh. 01-123-AB"
-                    maxLength={9}
-                    pattern="^(0[1-7])-[0-9]{3}-[A-Z]{2}$"
-                    title="Formati i sakte:  (prefiksi 01 deri 07)"
-                    className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                      plateError
+                    <label className="mb-2 block text-xs font-semibold">Targat e makines</label>
+                    <input
+                      type="text"
+                      value={plateNumber}
+                      onChange={(event) => {
+                        const formatted = formatPlateInput(event.target.value);
+                        setPlateNumber(formatted);
+                        setPlateError(getPlateValidationMessage(formatted));
+                      }}
+                      placeholder="p.sh. 01-123-AB"
+                      maxLength={9}
+                      pattern="^(0[1-7])-[0-9]{3}-[A-Z]{2}$"
+                      title="Formati i sakte:  (prefiksi 01 deri 07)"
+                      className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${plateError
                         ? isLightTheme
                           ? "border-rose-400 bg-rose-50 text-slate-800"
                           : "border-rose-400 bg-rose-950/20 text-cyan-50"
                         : isLightTheme
-                        ? "border-slate-300 bg-white text-slate-800"
-                        : "border-slate-600 bg-slate-800 text-cyan-50"
-                    }`}
-                    required
-                  />
-                  {plateError && (
-                    <div
-                      className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-                        isLightTheme
+                          ? "border-slate-300 bg-white text-slate-800"
+                          : "border-slate-600 bg-slate-800 text-cyan-50"
+                        }`}
+                      required
+                    />
+                    {plateError && (
+                      <div
+                        className={`mb-3 rounded-lg border px-3 py-2 text-xs ${isLightTheme
                           ? "border-rose-300 bg-rose-50 text-rose-700"
                           : "border-rose-300/60 bg-rose-500/15 text-rose-100"
-                      }`}
-                    >
-                      {plateError}
-                    </div>
-                  )}
-                  {reservationError && (
-                    <div
-                      className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-                        isLightTheme
+                          }`}
+                      >
+                        {plateError}
+                      </div>
+                    )}
+                    {reservationError && (
+                      <div
+                        className={`mb-3 rounded-lg border px-3 py-2 text-xs ${isLightTheme
                           ? "border-rose-300 bg-rose-50 text-rose-700"
                           : "border-rose-300/60 bg-rose-500/15 text-rose-100"
-                      }`}
-                    >
-                      {reservationError}
+                          }`}
+                      >
+                        {reservationError}
+                      </div>
+                    )}
+
+                    <label className="mb-2 block text-xs font-semibold">Lloji pageses</label>
+
+                    <div className="mb-3 grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("sms")}
+                        className={`rounded-lg border px-3 py-2 text-sm font-semibold text-white transition-all duration-200 ${paymentMethod === "sms"
+                          ? "border-indigo-200 !bg-indigo-600 shadow-md shadow-indigo-500/30"
+                          : "border-indigo-300/50 !bg-indigo-500 hover:!bg-indigo-600 hover:shadow-md hover:shadow-indigo-500/25 hover:scale-[1.02]"
+                          }`}
+                      >
+                        SMS
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("aparat")}
+                        className={`rounded-lg border px-3 py-2 text-sm font-semibold text-white transition-all duration-200 ${paymentMethod === "aparat"
+                          ? "border-cyan-200 !bg-cyan-600 shadow-md shadow-cyan-500/30"
+                          : "border-cyan-300/50 !bg-cyan-500 hover:!bg-cyan-600 hover:shadow-md hover:shadow-cyan-500/25 hover:scale-[1.02]"
+                          }`}
+                      >
+                        Aparat
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("kredi")}
+                        className={`rounded-lg border px-3 py-2 text-sm font-semibold text-white transition-all duration-200 ${paymentMethod === "kredi"
+                          ? "border-violet-200 !bg-violet-600 shadow-md shadow-violet-500/30"
+                          : "border-violet-300/50 !bg-violet-500 hover:!bg-violet-600 hover:shadow-md hover:shadow-violet-500/25 hover:scale-[1.02]"
+                          }`}
+                      >
+                        Kredi
+                      </button>
                     </div>
-                  )}
-                  <div
-                    className={`mb-3 rounded-lg px-3 py-2 text-sm ${
-                      isLightTheme ? "bg-cyan-50 text-slate-700" : "bg-cyan-500/10 text-cyan-100"
-                    }`}
-                  >
-                    Totali per pagese: <span className="font-bold">{selectedReservationAmount.toFixed(2)}€</span>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!isPlateValid || isSubmittingReservation}
-                    className="w-full rounded-lg border border-indigo-300/60 bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-2 text-sm font-semibold text-white hover:from-indigo-400 hover:to-violet-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSubmittingReservation
-                      ? "Duke procesuar..."
-                      : bookingHasMyActiveReservation
-                        ? "Zgjat & Paguaj"
-                        : "Paguaj & Rezervo"}
-                  </button>
+
+                    <div
+                      className={`mb-3 rounded-lg px-3 py-2 text-sm ${isLightTheme ? "bg-cyan-50 text-slate-700" : "bg-cyan-500/10 text-cyan-100"
+                        }`}
+                    >
+                      {paymentMethod === "kredi" && (
+                        <div
+                          className={`mb-3 rounded-lg border px-3 py-2 ${isLightTheme
+                            ? "border-emerald-200 bg-emerald-50 text-slate-800"
+                            : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100"
+                            }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold">Bilanci aktual</div>
+                              <div className="text-sm font-bold">
+                                {creditBalance} kredi ({creditBalanceEuro}€)
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={openTopUpModal}
+                              className="rounded-lg border border-emerald-200 !bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-md shadow-emerald-500/25 transition-all duration-200 hover:!bg-emerald-700"
+                            >
+                              Rimbush kredi
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      Totali per pagese: <span className="font-bold">{selectedReservationAmount.toFixed(2)}€</span>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={!isPlateValid || isSubmittingReservation}
+                      className="w-full rounded-lg border border-green-200 !bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-green-500/25 transition-all duration-200 hover:!bg-green-700 hover:shadow-lg hover:shadow-green-500/35 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+                    >
+                      {isSubmittingReservation
+                        ? "Duke procesuar..."
+                        : bookingHasMyActiveReservation
+                          ? "Zgjat & Paguaj"
+                          : "Paguaj & Rezervo"}
+                    </button>
                   </form>
                 )}
               </div>
@@ -1413,166 +1742,296 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
                   setPlateError("");
                   setReservationError("");
                 }}
-                className={`mt-3 w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
-                  isLightTheme
-                    ? "border-slate-300 text-slate-700 hover:bg-slate-100"
-                    : "border-slate-600 text-cyan-100 hover:bg-slate-800"
-                }`}
+                className={`mt-3 w-full rounded-lg border px-3 py-2 text-sm font-semibold ${isLightTheme
+                  ? "border-slate-300 text-slate-700 hover:bg-slate-100"
+                  : "border-slate-600 text-cyan-100 hover:bg-slate-800"
+                  }`}
               >
                 Mbyll
               </button>
             </div>
+          </div >
+        )}
+
+        {isTopUpModalOpen && (
+          <div className="fixed inset-0 z-[990] flex items-center justify-center bg-slate-950/70 p-3">
+            <div
+              className={`w-full max-w-md rounded-2xl border p-4 shadow-2xl ${isLightTheme
+                ? "border-cyan-200 bg-white text-slate-800"
+                : "border-cyan-300/30 bg-slate-900 text-cyan-50"
+                }`}
+            >
+              <div className="mb-3">
+                <div className="text-lg font-bold">Rimbush kredi</div>
+                <div className={`mt-1 text-xs ${isLightTheme ? "text-slate-500" : "text-cyan-100/70"}`}>
+                  Zgjidh shumen dhe ploteso te dhenat e karteles.
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <label className="mb-2 block text-xs font-semibold">Zgjidh shumen</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {topUpAmounts.map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      onClick={() => setSelectedTopUpEuro(amount)}
+                      className={`rounded-lg border px-2 py-2 text-sm font-semibold transition-all duration-200 ${selectedTopUpEuro === amount
+                        ? "border-yellow-200 !bg-yellow-400 text-slate-900 shadow-md shadow-yellow-500/30"
+                        : isLightTheme
+                          ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                          : "border-slate-600 bg-slate-800 text-cyan-50 hover:bg-slate-700"
+                        }`}
+                    >
+                      {amount}€
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <form onSubmit={handleTopUpSubmit}>
+                <label className="mb-2 block text-xs font-semibold">Emri ne kartele</label>
+                <input
+                  type="text"
+                  value={cardHolder}
+                  onChange={(event) => setCardHolder(event.target.value)}
+                  placeholder="p.sh. Filan Fisteku"
+                  className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
+                    ? "border-slate-300 bg-white text-slate-800"
+                    : "border-slate-600 bg-slate-800 text-cyan-50"
+                    }`}
+                />
+
+                <label className="mb-2 block text-xs font-semibold">Numri i karteles</label>
+                <input
+                  type="text"
+                  value={cardNumber}
+                  onChange={(event) => setCardNumber(event.target.value)}
+                  placeholder="XXXX XXXX XXXX XXXX"
+                  className={`mb-3 w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
+                    ? "border-slate-300 bg-white text-slate-800"
+                    : "border-slate-600 bg-slate-800 text-cyan-50"
+                    }`}
+                />
+
+                <div className="mb-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold">Skadenca</label>
+                    <input
+                      type="text"
+                      value={cardExpiry}
+                      onChange={(event) => setCardExpiry(event.target.value)}
+                      placeholder="MM/YY"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
+                        ? "border-slate-300 bg-white text-slate-800"
+                        : "border-slate-600 bg-slate-800 text-cyan-50"
+                        }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold">CVV</label>
+                    <input
+                      type="password"
+                      value={cardCvv}
+                      onChange={(event) => setCardCvv(event.target.value)}
+                      placeholder="123"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${isLightTheme
+                        ? "border-slate-300 bg-white text-slate-800"
+                        : "border-slate-600 bg-slate-800 text-cyan-50"
+                        }`}
+                    />
+                  </div>
+                </div>
+
+                {topUpError && (
+                  <div
+                    className={`mb-3 rounded-lg border px-3 py-2 text-xs ${isLightTheme
+                      ? "border-rose-300 bg-rose-50 text-rose-700"
+                      : "border-rose-300/60 bg-rose-500/15 text-rose-100"
+                      }`}
+                  >
+                    {topUpError}
+                  </div>
+                )}
+
+                <div
+                  className={`mb-3 rounded-lg px-3 py-2 text-sm ${isLightTheme ? "bg-cyan-50 text-slate-700" : "bg-cyan-500/10 text-cyan-100"
+                    }`}
+                >
+                  Do te shtohen{" "}
+                  <span className="font-bold">{selectedTopUpEuro * creditPerEuro} kredi</span>
+                  {" "}me vlere{" "}
+                  <span className="font-bold">{selectedTopUpEuro.toFixed(2)}€</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeTopUpModal}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${isLightTheme
+                      ? "border-slate-300 text-slate-700 hover:bg-slate-100"
+                      : "border-slate-600 text-cyan-100 hover:bg-slate-800"
+                      }`}
+                  >
+                    Mbyll
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isProcessingTopUp}
+                    className="flex-1 rounded-lg border border-green-200 !bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-green-500/25 transition-all duration-200 hover:!bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isProcessingTopUp ? "Duke procesuar..." : "Paguaj"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
+
         {occupiedWarning && (
           <div
-            className={`absolute left-1/2 z-[980] -translate-x-1/2 rounded-xl border px-3 py-2 shadow-xl backdrop-blur-md ${
-              isLightTheme
-                ? "top-2 border-rose-200 bg-white/95 text-rose-700"
-                : "top-2 border-rose-300/40 bg-slate-900/90 text-rose-100"
-            }`}
+            className={`absolute left-1/2 z-[980] -translate-x-1/2 rounded-xl border px-3 py-2 shadow-xl backdrop-blur-md ${isLightTheme
+              ? "top-2 border-rose-200 bg-white/95 text-rose-700"
+              : "top-2 border-rose-300/40 bg-slate-900/90 text-rose-100"
+              }`}
           >
             <div className="flex items-start gap-2">
               <AlertTriangle size={16} className="mt-0.5 text-rose-400" />
               <div>
                 <div className="text-xs font-bold">Ky parking eshte i nxane</div>
                 <div className={`${isMobile ? "text-[11px]" : "text-xs"} opacity-90`}>
-                  Parking {occupiedWarning.number}. Ju lutem zgjidhni nje vend te lire.
+                  Parking {occupiedWarning.number}. Ju lutem zgjedhni nje vend te lire.
                 </div>
               </div>
             </div>
           </div>
-        )}
-        {myCarMessage && (
-          <div
-            className={`absolute left-1/2 z-[980] -translate-x-1/2 rounded-xl border px-3 py-2 shadow-xl backdrop-blur-md ${
-              isLightTheme
+        )
+        }
+        {
+          myCarMessage && (
+            <div
+              className={`absolute left-1/2 z-[980] -translate-x-1/2 rounded-xl border px-3 py-2 shadow-xl backdrop-blur-md ${isLightTheme
                 ? "top-2 border-amber-200 bg-white/95 text-amber-700"
                 : "top-2 border-amber-300/40 bg-slate-900/90 text-amber-100"
-            }`}
-          >
-            <div className={`${isMobile ? "text-[11px]" : "text-xs"} font-semibold`}>{myCarMessage}</div>
-          </div>
-        )}
+                }`}
+            >
+              <div className={`${isMobile ? "text-[11px]" : "text-xs"} font-semibold`}>{myCarMessage}</div>
+            </div>
+          )
+        }
         <div className={`absolute z-[900] ${isMobile ? "top-2 right-2" : "top-3 right-3"}`}>
           <div className="flex items-center gap-1 rounded-md border border-cyan-300/50 bg-slate-900/50 p-1">
             <button
               type="button"
               onClick={() => setMapStyle("googleHybrid")}
-              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${
-                mapStyle === "googleHybrid"
-                  ? "bg-cyan-500 text-white"
-                  : "text-cyan-100 hover:bg-cyan-400/20"
-              }`}
+              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${mapStyle === "googleHybrid"
+                ? "bg-cyan-500 text-white"
+                : "text-cyan-100 hover:bg-cyan-400/20"
+                }`}
             >
               Hybrid
             </button>
             <button
               type="button"
               onClick={() => setMapStyle("googleSatellite")}
-              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${
-                mapStyle === "googleSatellite"
-                  ? "bg-cyan-500 text-white"
-                  : "text-cyan-100 hover:bg-cyan-400/20"
-              }`}
+              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${mapStyle === "googleSatellite"
+                ? "bg-cyan-500 text-white"
+                : "text-cyan-100 hover:bg-cyan-400/20"
+                }`}
             >
               Satellite
             </button>
             <button
               type="button"
               onClick={() => setMapStyle("street")}
-              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${
-                mapStyle === "street"
-                  ? "bg-cyan-500 text-white"
-                  : "text-cyan-100 hover:bg-cyan-400/20"
-              }`}
+              className={`rounded px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${mapStyle === "street"
+                ? "bg-cyan-500 text-white"
+                : "text-cyan-100 hover:bg-cyan-400/20"
+                }`}
             >
               Street
             </button>
           </div>
         </div>
 
-        {selectedSlot && !bookingSlot && (
-          <div
-            className={`absolute z-[950] rounded-xl shadow-lg backdrop-blur-md ${
-              isLightTheme
+        {
+          selectedSlot && !bookingSlot && (
+            <div
+              className={`absolute z-[950] rounded-xl shadow-lg backdrop-blur-md ${isLightTheme
                 ? "border border-cyan-200 bg-white/96 text-slate-800"
                 : "border border-cyan-300/30 bg-slate-900/88 text-cyan-50"
-            } ${
-              isMobile ? "left-2 right-2 bottom-2 px-3 py-3" : "left-3 bottom-3 max-w-[360px] px-3 py-3"
-            }`}
-          >
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <div className={`text-[11px] font-semibold ${isLightTheme ? "text-amber-600" : "text-amber-300"}`}>
-                Selected parking
-              </div>
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  selectedSlot.isFree
+                } ${isMobile ? "left-2 right-2 bottom-2 px-3 py-3" : "left-3 bottom-3 max-w-[360px] px-3 py-3"
+                }`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className={`text-[11px] font-semibold ${isLightTheme ? "text-amber-600" : "text-amber-300"}`}>
+                  Selected parking
+                </div>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${selectedSlot.isFree
                     ? isLightTheme
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-emerald-400/20 text-emerald-200"
                     : isLightTheme
                       ? "bg-rose-100 text-rose-700"
                       : "bg-rose-400/20 text-rose-200"
-                }`}
-              >
-                {selectedSlot.isFree ? "I lire" : "I zene"}
-              </span>
+                    }`}
+                >
+                  {selectedSlot.isFree ? "I lire" : "I zene"}
+                </span>
+              </div>
+              <div className={`text-sm font-semibold ${isLightTheme ? "text-slate-800" : "text-cyan-50"}`}>
+                Parking {selectedSlot.number}
+              </div>
+              <div className={`${isMobile ? "mt-1 text-xs" : "mt-1 text-[11px]"} ${isLightTheme ? "text-slate-600" : "text-cyan-100/80"}`}>
+                Lat: {selectedSlot.center[0].toFixed(6)} | Lng: {selectedSlot.center[1].toFixed(6)}
+              </div>
+              <div className={`${isMobile ? "mt-1 text-xs" : "mt-1 text-[11px]"} break-all ${isLightTheme ? "text-slate-500" : "text-cyan-100/60"}`}>
+                Full: {selectedSlot.center[0]}, {selectedSlot.center[1]}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => openDirectionsToSlot(selectedSlot)}
+                  className={`rounded-md bg-gradient-to-r from-cyan-500 to-sky-500 text-white font-semibold hover:from-cyan-400 hover:to-sky-400 ${isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
+                    }`}
+                >
+                  Navigate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openGooglePin(selectedSlot)}
+                  className={`rounded-md border border-indigo-300/60 bg-gradient-to-r from-indigo-500 to-violet-500 text-white hover:from-indigo-400 hover:to-violet-400 ${isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
+                    }`}
+                >
+                  Google Pin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    copyCoordinates(selectedSlot).catch(() => { });
+                  }}
+                  className={`rounded-md border border-slate-400/70 bg-slate-700 text-white hover:bg-slate-600 ${isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
+                    }`}
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSlot(null)}
+                  className={`rounded-md border border-rose-300/70 bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-400 hover:to-pink-400 ${isMobile ? "min-h-10 w-full px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
+                    }`}
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            <div className={`text-sm font-semibold ${isLightTheme ? "text-slate-800" : "text-cyan-50"}`}>
-              Parking {selectedSlot.number}
-            </div>
-            <div className={`${isMobile ? "mt-1 text-xs" : "mt-1 text-[11px]"} ${isLightTheme ? "text-slate-600" : "text-cyan-100/80"}`}>
-              Lat: {selectedSlot.center[0].toFixed(6)} | Lng: {selectedSlot.center[1].toFixed(6)}
-            </div>
-            <div className={`${isMobile ? "mt-1 text-xs" : "mt-1 text-[11px]"} break-all ${isLightTheme ? "text-slate-500" : "text-cyan-100/60"}`}>
-              Full: {selectedSlot.center[0]}, {selectedSlot.center[1]}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => openDirectionsToSlot(selectedSlot)}
-                className={`rounded-md bg-gradient-to-r from-cyan-500 to-sky-500 text-white font-semibold hover:from-cyan-400 hover:to-sky-400 ${
-                  isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
-                }`}
-              >
-                Navigate
-              </button>
-              <button
-                type="button"
-                onClick={() => openGooglePin(selectedSlot)}
-                className={`rounded-md border border-indigo-300/60 bg-gradient-to-r from-indigo-500 to-violet-500 text-white hover:from-indigo-400 hover:to-violet-400 ${
-                  isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
-                }`}
-              >
-                Google Pin
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  copyCoordinates(selectedSlot).catch(() => {});
-                }}
-                className={`rounded-md border border-slate-400/70 bg-slate-700 text-white hover:bg-slate-600 ${
-                  isMobile ? "min-h-10 flex-1 px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
-                }`}
-              >
-                Copy
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSlot(null)}
-                className={`rounded-md border border-rose-300/70 bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-400 hover:to-pink-400 ${
-                  isMobile ? "min-h-10 w-full px-3 py-2 text-sm" : "px-2.5 py-1.5 text-xs"
-                }`}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
+          )
+        }
 
-      </div>
+      </div >
       <style>{`
         .leaflet-container.map-cursor {
           cursor: crosshair;
@@ -1625,6 +2084,6 @@ export default function VisitorZoneCard({ zone, zoneLabel, theme = "dark" }) {
           background: linear-gradient(180deg, rgba(129, 140, 248, 0.98), rgba(167, 139, 250, 0.95));
         }
       `}</style>
-    </div>
+    </div >
   );
 }

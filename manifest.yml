@@ -1,0 +1,13 @@
+applications:
+  - name: parking-prototype
+    path: .
+    memory: 512M
+    disk_quota: 1G
+    buildpacks:
+      - nodejs_buildpack
+    command: npm start
+    random-route: true
+    env:
+      CDS_ENV: development
+      NODE_ENV: development
+      NPM_CONFIG_PRODUCTION: false
