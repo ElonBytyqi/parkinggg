@@ -32,10 +32,23 @@ function formatDashboardDuration(hours) {
 
   return "-";
 }
+function getDashboardDate(value) {
+  if (!value) return null;
 
+  const directDate = new Date(value);
+  if (!Number.isNaN(directDate.getTime())) return directDate;
+
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) {
+    const numericDate = new Date(numericValue);
+    if (!Number.isNaN(numericDate.getTime())) return numericDate;
+  }
+
+  return null;
+}
 function formatDashboardExpiryTime(expiresAt) {
-  const date = new Date(Number(expiresAt || 0));
-  if (Number.isNaN(date.getTime())) return "-";
+  const date = getDashboardDate(expiresAt);
+  if (!date) return "-";
 
   return date.toLocaleTimeString("de-DE", {
     hour: "2-digit",
@@ -45,8 +58,8 @@ function formatDashboardExpiryTime(expiresAt) {
 }
 
 function formatDashboardExpiryDate(expiresAt) {
-  const date = new Date(Number(expiresAt || 0));
-  if (Number.isNaN(date.getTime())) return "-";
+  const date = getDashboardDate(expiresAt);
+  if (!date) return "-";
 
   return date.toLocaleDateString("de-DE");
 }
@@ -183,26 +196,32 @@ export default function App() {
 
     return zones
       .flatMap((zone, index) => {
-        const zoneKey = String(zone.ID || "");
-        const zoneReservations = visitorReservationsSnapshot[zoneKey] || {};
         const dashboardZoneLabel = zoneLabelById.get(zone.ID) || zone.code || zone.name || `P${index + 1}`;
 
-        return Object.entries(zoneReservations)
-          .filter(([, reservation]) => Number(reservation?.expiresAt || 0) > now)
-          .map(([slotNumber, reservation]) => ({
+        return (zone.spots || [])
+          .filter((spot) => {
+            const status = String(spot?.status || "").toUpperCase();
+            if (status !== "OCCUPIED") return false;
+
+            const expiresAtDate = getDashboardDate(spot?.expiresAt);
+            if (!expiresAtDate) return false;
+
+            return expiresAtDate.getTime() > now;
+          })
+          .map((spot) => ({
             zone: dashboardZoneLabel,
-            parking: slotNumber,
-            car: reservation?.plate || "-",
-            duration: formatDashboardDuration(reservation?.hours),
-            expiryTime: formatDashboardExpiryTime(reservation?.expiresAt),
-            expiryDate: formatDashboardExpiryDate(reservation?.expiresAt),
+            parking: spot?.number ?? "-",
+            car: spot?.plate || "-",
+            duration: formatDashboardDuration(spot?.reservedHours),
+            expiryTime: formatDashboardExpiryTime(spot?.expiresAt),
+            expiryDate: formatDashboardExpiryDate(spot?.expiresAt),
           }));
       })
       .sort((a, b) => {
         if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
         return Number(a.parking) - Number(b.parking);
       });
-  }, [zones, visitorReservationsSnapshot, zoneLabelById]);
+  }, [zones, zoneLabelById]);
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-cyan-50 flex items-center justify-center">
@@ -447,8 +466,8 @@ export default function App() {
         <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/70 p-2 sm:p-3">
           <div
             className={`flex h-[92dvh] max-h-[92dvh] w-full max-w-5xl flex-col rounded-2xl border p-3 shadow-2xl sm:h-[88vh] sm:max-h-[88vh] sm:p-4 ${isVisitorLight
-                ? "border-cyan-200 bg-white text-slate-800"
-                : "border-cyan-300/30 bg-slate-900 text-cyan-50"
+              ? "border-cyan-200 bg-white text-slate-800"
+              : "border-cyan-300/30 bg-slate-900 text-cyan-50"
               }`}
           >
             <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
@@ -463,8 +482,8 @@ export default function App() {
                 type="button"
                 onClick={() => setShowVisitorDashboard(false)}
                 className={`rounded-lg border p-2 transition ${isVisitorLight
-                    ? "border-slate-200 text-slate-600 hover:bg-slate-100"
-                    : "border-slate-600 text-cyan-100 hover:bg-slate-800"
+                  ? "border-slate-200 text-slate-600 hover:bg-slate-100"
+                  : "border-slate-600 text-cyan-100 hover:bg-slate-800"
                   }`}
               >
                 <X size={18} />
@@ -482,8 +501,8 @@ export default function App() {
                 <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                   <thead
                     className={`sticky top-0 z-10 ${isVisitorLight
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-slate-800 text-cyan-100"
+                      ? "bg-slate-100 text-slate-700"
+                      : "bg-slate-800 text-cyan-100"
                       }`}
                   >
                     <tr>
@@ -502,8 +521,8 @@ export default function App() {
                         <tr
                           key={`${row.zone}-${row.parking}-${row.car}-${index}`}
                           className={`border-t ${isVisitorLight
-                              ? "border-slate-200 hover:bg-slate-50"
-                              : "border-slate-700 hover:bg-slate-800/70"
+                            ? "border-slate-200 hover:bg-slate-50"
+                            : "border-slate-700 hover:bg-slate-800/70"
                             }`}
                         >
                           <td className="whitespace-nowrap px-3 py-3 font-semibold">{row.zone}</td>

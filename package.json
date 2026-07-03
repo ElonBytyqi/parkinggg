@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "description": "Parking management app with real-time availability.",
   "dependencies": {
-    "@sap/cds": "^9",
-    "@cap-js/sqlite": "^2",
     "@cap-js/postgres": "^2",
+    "@cap-js/sqlite": "^2",
+    "@sap/cds": "^9",
     "express": "^4"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@sap/cds-dk": "^9.9.1"
+  },
   "scripts": {
     "start": "cds-serve --with-mocks --in-memory",
     "start:local": "cds-serve --with-mocks --in-memory",

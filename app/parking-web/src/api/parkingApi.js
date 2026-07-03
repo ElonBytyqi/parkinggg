@@ -50,11 +50,18 @@ export async function deductCredits(ID, amountCredits) {
 
   return await res.json();
 }
-export async function reserveSpot(ID) {
+export async function reserveSpot(ID, reservationData = {}) {
   const res = await fetch(`${API}/reserveSpot`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ID }),
+    body: JSON.stringify({
+      ID,
+      plate: reservationData.plate,
+      hours: reservationData.hours,
+      amount: reservationData.amount,
+      credits: reservationData.credits,
+      paymentMethod: reservationData.paymentMethod,
+    }),
   });
 
   if (!res.ok) {

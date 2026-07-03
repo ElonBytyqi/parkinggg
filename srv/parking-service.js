@@ -20,20 +20,35 @@ module.exports = cds.service.impl(function () {
   });
 
   // Action: toggleStatus (UPDATE)
-  this.on("toggleStatus", async (req) => {
-    const { ID } = req.data;
+this.on("toggleStatus", async (req) => {
+  const { ID } = req.data;
 
-    const spot = await SELECT.one.from(Spots).where({ ID });
-    if (!spot) req.error(404, "Parking spot not found");
+  const spot = await SELECT.one.from(Spots).where({ ID });
+  if (!spot) return req.reject(404, "Parking spot not found");
 
-    const newStatus = spot.status === "OCCUPIED" ? "FREE" : "OCCUPIED";
+  const newStatus = spot.status === "OCCUPIED" ? "FREE" : "OCCUPIED";
 
-    await UPDATE(Spots)
-      .set({ status: newStatus, updatedAt: new Date().toISOString() })
-      .where({ ID });
+  const updateData =
+    newStatus === "FREE"
+      ? {
+          status: "FREE",
+          plate: null,
+          reservedHours: null,
+          amount: null,
+          credits: null,
+          paymentMethod: null,
+          expiresAt: null,
+          updatedAt: new Date().toISOString()
+        }
+      : {
+          status: "OCCUPIED",
+          updatedAt: new Date().toISOString()
+        };
 
-    return await SELECT.one.from(Spots).where({ ID });
-  });
+  await UPDATE(Spots).set(updateData).where({ ID });
+
+  return await SELECT.one.from(Spots).where({ ID });
+});
 
 
   this.on("deductCredits", async (req) => {
@@ -64,7 +79,7 @@ module.exports = cds.service.impl(function () {
   });
 
   this.on("reserveSpot", async (req) => {
-    const { ID } = req.data;
+    const { ID, plate, hours, amount, credits, paymentMethod } = req.data;
 
     const spot = await SELECT.one.from(Spots).where({ ID });
     if (!spot) return req.reject(404, "Parking spot not found");
@@ -73,9 +88,18 @@ module.exports = cds.service.impl(function () {
       return req.reject(409, "Parking spot is already occupied");
     }
 
+    const numericHours = Number(hours || 0);
+    const expiresAt = new Date(Date.now() + numericHours * 60 * 60 * 1000).toISOString();
+
     await UPDATE(Spots)
       .set({
         status: "OCCUPIED",
+        plate,
+        reservedHours: numericHours,
+        amount,
+        credits,
+        paymentMethod,
+        expiresAt,
         updatedAt: new Date().toISOString()
       })
       .where({ ID });
@@ -92,6 +116,12 @@ module.exports = cds.service.impl(function () {
     await UPDATE(Spots)
       .set({
         status: "FREE",
+        plate: null,
+        reservedHours: null,
+        amount: null,
+        credits: null,
+        paymentMethod: null,
+        expiresAt: null,
         updatedAt: new Date().toISOString()
       })
       .where({ ID });
